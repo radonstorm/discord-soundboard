@@ -1,6 +1,9 @@
 const Discord = require('discord.js');
 const client = new Discord.Client();
-const properties = require('properties')
+const properties = require('properties');
+
+// reference to current voice connection, only connected to one vc at a time
+var currentConnection = null;
 
 // read token from a config.ini file and login
 properties.parse('config.ini', { path: true }, function(error, obj){
@@ -19,14 +22,36 @@ client.on('message', async message => {
     // messages sent to text channels
     if (message.guild){
         if (message.content === '.join') {
-            // Try to join the sender's voice channel
-            if (message.member.voice.channel) {
-                const connection = await message.member.voice.channel.join()
-                console.log('Joined #' + connection.channel.name);
+            if (!currentConnection)
+            {
+                // Try to join the sender's voice channel
+                if (message.member.voice.channel) {
+                    const connection = await message.member.voice.channel.join();
+                    currentConnection = connection;
+                    console.log('Joined #' + connection.channel.name);
+                }
+                else
+                {
+                    message.reply('You need to be in a voice channel for that to work...');
+                }
             }
             else
             {
-                message.reply('You need to be in a voice channel for that to work...');
+                message.reply("I'm already in a voice channel");
+            }
+        }
+        else if (message.content === '.dc')
+        {
+            if (currentConnection)
+            {
+                let name = currentConnection.channel.name;
+                currentConnection.disconnect();
+                currentConnection = null;
+                console.log('Disconnected from #' + name);
+            }
+            else
+            {
+                message.reply('Not currently in a voice channel');
             }
         }
     }
