@@ -57,5 +57,13 @@ client.on('message', async message => {
                 message.reply('Not currently in a voice channel');
             }
         }
+        else if (message.content === '.play' && currentConnection)
+        {
+            currentConnection.playFile(__dirname + '/audio/test.mp3');
+        }
+        else if (message.content === '.stop' && currentConnection)
+        {
+            currentConnection.dispatcher.end();
+        }
     }
 });
