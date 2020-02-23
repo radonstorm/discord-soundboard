@@ -25,10 +25,13 @@ client.on('message', async message => {
             if (!currentConnection)
             {
                 // Try to join the sender's voice channel
-                if (message.member.voice.channel) {
-                    const connection = await message.member.voice.channel.join();
-                    currentConnection = connection;
-                    console.log('Joined #' + connection.channel.name);
+                if (message.member.voiceChannel) {
+                    message.member.voiceChannel.join()
+                        .then(connection => {
+                            currentConnection = connection;
+                            console.log('Joined #' + connection.channel.name);
+                        })
+                        .catch(console.log);
                 }
                 else
                 {
