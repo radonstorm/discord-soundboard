@@ -11,6 +11,15 @@ client.on('ready', () => {
     console.log('Bot is online');
 })
 
+function destroySoundboard(guild)
+{
+    let channel = guild.channels.cache.find(channel => channel.name === 'soundboard');
+    if (channel)
+    {
+        channel.delete();
+    }
+}
+
 client.on('message', async message => {
     // messages sent to text channels
     if (message.guild){
@@ -19,9 +28,29 @@ client.on('message', async message => {
             {
                 // Try to join the sender's voice channel
                 if (message.member.voice.channel) {
-                    let connection = await message.member.voice.channel.join();
+                    let voiceChannel = message.member.voice.channel;
+                    let connection = await voiceChannel.join();
                     currentConnection = connection;
                     console.log('Joined #' + connection.channel.name);
+                    
+                    // create soundboard interface
+                    let newChannel = await message.guild.channels.create('soundboard', {
+                        type: 'text',
+                        topic: 'Interface for Soundboard',
+                        parent: voiceChannel.parent,
+                        // deny people to message soundboard channel
+                        permissionOverwrites: [
+                            {
+                                id: message.guild.roles.everyone,
+                                deny: ['SEND_MESSAGES']
+                            }
+                        ]
+                    });
+                    // send control panel message and add emoji reactions
+                    let controls = await newChannel.send('Test');
+                    message.guild.emojis.cache.each(emoji => {
+                        controls.react(emoji);
+                    })
                 }
                 else
                 {
@@ -41,6 +70,7 @@ client.on('message', async message => {
                 currentConnection.disconnect();
                 currentConnection = null;
                 console.log('Disconnected from #' + name);
+                destroySoundboard(message.guild);
             }
             else
             {
@@ -54,6 +84,19 @@ client.on('message', async message => {
         else if (message.content === '.stop' && currentConnection)
         {
             currentConnection.dispatcher.end();
+        }
+        else if (message.content === '.die')
+        {
+            if(currentConnection)
+            {
+                currentConnection.disconnect();
+                currentConnection = null;
+            }
+            client.guilds.cache.each(guild =>
+            {
+                destroySoundboard(guild);
+            });
+            client.destroy();
         }
     }
 });
