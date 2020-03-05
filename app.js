@@ -25,13 +25,10 @@ client.on('message', async message => {
             if (!currentConnection)
             {
                 // Try to join the sender's voice channel
-                if (message.member.voiceChannel) {
-                    message.member.voiceChannel.join()
-                        .then(connection => {
-                            currentConnection = connection;
-                            console.log('Joined #' + connection.channel.name);
-                        })
-                        .catch(console.log);
+                if (message.member.voice.channel) {
+                    let connection = await message.member.voice.channel.join();
+                    currentConnection = connection;
+                    console.log('Joined #' + connection.channel.name);
                 }
                 else
                 {
@@ -59,7 +56,7 @@ client.on('message', async message => {
         }
         else if (message.content === '.play' && currentConnection)
         {
-            currentConnection.playFile(__dirname + '/audio/test.mp3');
+            currentConnection.play(__dirname + '/audio/test.mp3');
         }
         else if (message.content === '.stop' && currentConnection)
         {

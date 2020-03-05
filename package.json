@@ -2,15 +2,15 @@
   "name": "discord-soundboard",
   "version": "1.0.0",
   "description": "A soundboard for discord voice channels",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Jack Lardner",
   "license": "GPL-3.0",
   "dependencies": {
-    "discord.js": "^11.5.1",
-    "node-opus": "^0.3.3",
+    "@discordjs/opus": "^0.1.0",
+    "discord.js": "^12.0.1",
     "properties": "^1.2.1"
   }
 }
