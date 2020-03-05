@@ -1,18 +1,11 @@
 const Discord = require('discord.js');
 const client = new Discord.Client();
-const properties = require('properties');
+const config = require('./config.json');
 
 // reference to current voice connection, only connected to one vc at a time
 var currentConnection = null;
 
-// read token from a config.ini file and login
-properties.parse('config.ini', { path: true }, function(error, obj){
-    if(error)
-    {
-        console.error(error);
-    }
-    client.login(obj.token)
-})
+client.login(config.token);
 
 client.on('ready', () => {
     console.log('Bot is online');
