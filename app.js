@@ -2,8 +2,12 @@ const Discord = require('discord.js');
 const client = new Discord.Client();
 const config = require('./config.json');
 
+const CATEGORY_NAME = 'soundboard';
+const CHANNEL_NAME = 'soundboard-controls';
+
 // reference to current voice connection, only connected to one vc at a time
 var currentConnection = null;
+var soundboardControl = null;
 
 client.login(config.token);
 
@@ -13,12 +17,32 @@ client.on('ready', () => {
 
 function destroySoundboard(guild)
 {
-    let channel = guild.channels.cache.find(channel => channel.name === 'soundboard');
+    let channel = guild.channels.cache.find(channel => channel.name === CHANNEL_NAME);
     if (channel)
     {
         channel.delete();
     }
+    let category = guild.channels.cache.find(category => category.name === CATEGORY_NAME);
+    if (category)
+    {
+        category.delete();
+    }
+    soundboardControl = null;
 }
+
+client.on('messageReactionAdd', (reaction, user) => {
+    // only check user reactions on the soundboard control message
+    if(user.id != config.user_id && reaction.message.id === soundboardControl.id)
+    {
+        if(currentConnection)
+        {
+            // remove user's reactions
+            reaction.users.remove(user);
+            // play sound
+            currentConnection.play(__dirname + '/audio/test.mp3');
+        }
+    }
+});
 
 client.on('message', async message => {
     // messages sent to text channels
@@ -34,10 +58,17 @@ client.on('message', async message => {
                     console.log('Joined #' + connection.channel.name);
                     
                     // create soundboard interface
-                    let newChannel = await message.guild.channels.create('soundboard', {
+                    // create category first
+                    let newCategory = await message.guild.channels.create(CATEGORY_NAME, {
+                        type: 'category',
+                        position: voiceChannel.parent.position + 1
+                    });
+
+                    // create channel
+                    let newChannel = await message.guild.channels.create(CHANNEL_NAME, {
                         type: 'text',
                         topic: 'Interface for Soundboard',
-                        parent: voiceChannel.parent,
+                        parent: newCategory,
                         // deny people to message soundboard channel
                         permissionOverwrites: [
                             {
@@ -47,10 +78,10 @@ client.on('message', async message => {
                         ]
                     });
                     // send control panel message and add emoji reactions
-                    let controls = await newChannel.send('Test');
+                    soundboardControl = await newChannel.send('Test');
                     message.guild.emojis.cache.each(emoji => {
-                        controls.react(emoji);
-                    })
+                        soundboardControl.react(emoji);
+                    });
                 }
                 else
                 {
