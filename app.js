@@ -7,13 +7,19 @@ const CHANNEL_NAME = 'soundboard-controls';
 
 // reference to current voice connection, only connected to one vc at a time
 var currentConnection = null;
+// reference to soundboard-controls channel
 var soundboardControl = null;
+
+// bot setup state
+// false is no setup is taking place
+// true is an admin is assigning a reaction to a soundclip
+var setupState = false;
 
 client.login(config.token);
 
 client.on('ready', () => {
     console.log('Bot is online');
-})
+});
 
 function destroySoundboard(guild)
 {
@@ -30,9 +36,9 @@ function destroySoundboard(guild)
     soundboardControl = null;
 }
 
-client.on('messageReactionAdd', (reaction, user) => {
+client.on('messageReactionAdd', async (reaction, user) => {
     // only check user reactions on the soundboard control message
-    if(user.id != config.user_id && reaction.message.id === soundboardControl.id)
+    if(user.id != config.user_id && soundboardControl && reaction.message.id === soundboardControl.id)
     {
         if(currentConnection)
         {
@@ -41,6 +47,23 @@ client.on('messageReactionAdd', (reaction, user) => {
             // play sound
             currentConnection.play(__dirname + '/audio/test.mp3');
         }
+    }
+    // messages reacted to during setup (setting up 1 soundclip)
+    if (user.id != config.user_id && reaction.message.channel.name === 'soundboard-setup' && !setupState)
+    {
+        console.log('Setting up one soundclip');
+        setupState = true;
+        reaction.message.channel.send('You reacted with ' + reaction.emoji.toString());
+        let soundclip = await reaction.message.channel.send('Which sound file should be played?');
+        // do something to have the user select soundclip
+        let collected = await soundclip.awaitReactions(() => true, {
+            max: 1,
+            maxEmojis: 1,
+            maxUsers: 1
+        });
+        reaction.message.channel.send('Got it, assigning sound ' + collected.first().emoji + ' to the emoji reaction ' + reaction.emoji.toString());
+        reaction.message.channel.send('What reaction should we setup next?');
+        setupState = false;
     }
 });
 
@@ -90,7 +113,7 @@ client.on('message', async message => {
             }
             else
             {
-                message.reply("I'm already in a voice channel");
+                message.reply('I\'m already in a voice channel');
             }
         }
         else if (message.content === '.dc')
@@ -128,6 +151,47 @@ client.on('message', async message => {
                 destroySoundboard(guild);
             });
             client.destroy();
+        }
+        // test command for bot setup
+        else if (message.content === '.setup')
+        {
+            // check if message was sent by server owner
+            if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR))
+            {
+                // create setup channel
+                try
+                {
+                    let channel = await message.guild.channels.create('soundboard-setup', {
+                        type: 'text',
+                        parent: message.parent,
+                        position: message.position + 1,
+                        permissionOverwrites: [
+                            {
+                                id: message.author,
+                                allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                            },
+                            {
+                                id: message.guild.roles.everyone,
+                                deny: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                            }
+                        ]
+                    });
+                    channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
+                    channel.send('Use .finish to finish the setup');
+                }
+                catch(e)
+                {
+                    console.log(e);
+                }
+            }
+        }
+        else if (message.content === '.finish')
+        {
+            if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR) && !setupState)
+            {
+                let setupChannel = message.guild.channels.cache.find(channel => channel.name === 'soundboard-setup');
+                setupChannel.delete('Finished soundboard bot setup');
+            }
         }
     }
 });
