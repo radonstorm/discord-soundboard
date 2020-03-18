@@ -1,24 +1,49 @@
 const Discord = require('discord.js');
 const client = new Discord.Client();
 const config = require('./config.json');
+const Sequelize = require('sequelize');
+const fs = require('fs');
 
 const CATEGORY_NAME = 'soundboard';
 const CHANNEL_NAME = 'soundboard-controls';
+const SETUP_NAME = 'soundboard-setup';
+const AUDIO_DIR = __dirname + '/audio/';
 
 // reference to current voice connection, only connected to one vc at a time
 var currentConnection = null;
 // reference to soundboard-controls channel
 var soundboardControl = null;
+// reference to currently active setup message
+var setupMessage = null;
 
-// bot setup state
-// false is no setup is taking place
-// true is an admin is assigning a reaction to a soundclip
-var setupState = false;
+// list of soundfiles found in AUDIO_DIR. populated during setup and destroyed after
+var soundFiles = null;
+// list of selection emoji used during setup
+var selectionEmoji = null;
+
+// map of emoji to sound filenames
+const sounds = new Map();
+
+// database connection
+const database = new Sequelize('database', 'user', 'password', {
+    host: 'localhost',
+    dialect: 'sqlite',
+    storage: 'botsettings.sqlite'
+});
+// define db model
+const emojiBindings = database.define('emojibindings', {
+    emoji_id: {
+        type: Sequelize.STRING,
+        unique: true
+    },
+    soundclip_path: Sequelize.STRING
+});
 
 client.login(config.token);
 
 client.on('ready', () => {
     console.log('Bot is online');
+    emojiBindings.sync({force: true});
 });
 
 function destroySoundboard(guild)
@@ -45,25 +70,41 @@ client.on('messageReactionAdd', async (reaction, user) => {
             // remove user's reactions
             reaction.users.remove(user);
             // play sound
-            currentConnection.play(__dirname + '/audio/test.mp3');
+            console.log(reaction.emoji.id);
+            console.log('Playing ' + sounds.get(reaction.emoji.id));
+            currentConnection.play(AUDIO_DIR + sounds.get(reaction.emoji.id));
         }
     }
     // messages reacted to during setup (setting up 1 soundclip)
-    if (user.id != config.user_id && reaction.message.channel.name === 'soundboard-setup' && !setupState)
+    if (user.id != config.user_id && reaction.message.channel.name === SETUP_NAME && reaction.message.id == setupMessage.id)
     {
         console.log('Setting up one soundclip');
-        setupState = true;
         reaction.message.channel.send('You reacted with ' + reaction.emoji.toString());
-        let soundclip = await reaction.message.channel.send('Which sound file should be played?');
         // do something to have the user select soundclip
-        let collected = await soundclip.awaitReactions(() => true, {
+        // send message of audio files
+        let message = '', ii = 0;
+        soundFiles.forEach(file => {
+            message = message + selectionEmoji[ii].toString() + ' - ' + file + '\n';
+            ii++;
+        });
+        message = message + 'Which sound file should be played?';
+        let selectionMessage = await reaction.message.channel.send(message);
+        selectionEmoji.forEach(async (emoji) => {
+            await selectionMessage.react(emoji);
+        });
+        let collected = await selectionMessage.awaitReactions((reaction, user) => user.id != config.user_id, {
             max: 1,
             maxEmojis: 1,
             maxUsers: 1
         });
-        reaction.message.channel.send('Got it, assigning sound ' + collected.first().emoji + ' to the emoji reaction ' + reaction.emoji.toString());
-        reaction.message.channel.send('What reaction should we setup next?');
-        setupState = false;
+        let selectedSound = soundFiles[selectionEmoji.indexOf(collected.first().emoji)];
+        reaction.message.channel.send('Got it, assigning sound ' + selectedSound + ' to the emoji reaction ' + reaction.emoji.toString());
+        // add sound to sound map
+        sounds.set(collected.first().emoji.id, selectedSound);
+        // remove emoji and soundfile from arrays
+        soundFiles.splice(soundFiles.indexOf(selectedSound), 1);
+        selectionEmoji.splice(selectionEmoji.indexOf(collected.first().emoji), 1);
+        setupMessage = await reaction.message.channel.send('React again to setup another sound or type ".finish" to end setup');
     }
 });
 
@@ -133,7 +174,7 @@ client.on('message', async message => {
         }
         else if (message.content === '.play' && currentConnection)
         {
-            currentConnection.play(__dirname + '/audio/test.mp3');
+            currentConnection.play(AUDIO_DIR + 'test.mp3');
         }
         else if (message.content === '.stop' && currentConnection)
         {
@@ -161,8 +202,13 @@ client.on('message', async message => {
                 // create setup channel
                 try
                 {
-                    let channel = await message.guild.channels.create('soundboard-setup', {
+                    // populate file list
+                    soundFiles = fs.readdirSync(AUDIO_DIR);
+                    // populate selection emoji list
+                    selectionEmoji = Array.from(message.guild.emojis.cache.values());
+                    let channel = await message.guild.channels.create(SETUP_NAME, {
                         type: 'text',
+                        topic: 'Setup channel for Soundboard',
                         parent: message.parent,
                         position: message.position + 1,
                         permissionOverwrites: [
@@ -176,7 +222,7 @@ client.on('message', async message => {
                             }
                         ]
                     });
-                    channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
+                    setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
                     channel.send('Use .finish to finish the setup');
                 }
                 catch(e)
@@ -187,10 +233,15 @@ client.on('message', async message => {
         }
         else if (message.content === '.finish')
         {
-            if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR) && !setupState)
+            if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR))
             {
-                let setupChannel = message.guild.channels.cache.find(channel => channel.name === 'soundboard-setup');
+                let setupChannel = message.guild.channels.cache.find(channel => channel.name === SETUP_NAME);
                 setupChannel.delete('Finished soundboard bot setup');
+                soundFiles = null;
+                selectionEmoji = null;
+                setupMessage = null;
+                console.log(sounds.values());
+                console.log(sounds.keys());
             }
         }
     }

@@ -114,3 +114,6 @@ audio/
 
 # config file
 config.json
+
+# sqlite dbs
+*.sqlite
