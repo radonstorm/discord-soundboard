@@ -70,7 +70,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
             // remove user's reactions
             reaction.users.remove(user);
             // play sound
-            console.log(reaction.emoji.id);
             console.log('Playing ' + sounds.get(reaction.emoji.id));
             currentConnection.play(AUDIO_DIR + sounds.get(reaction.emoji.id));
         }
@@ -100,7 +99,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
         let selectedSound = soundFiles[selectionEmoji.indexOf(collected.first().emoji)];
         reaction.message.channel.send('Got it, assigning sound ' + selectedSound + ' to the emoji reaction ' + reaction.emoji.toString());
         // add sound to sound map
-        sounds.set(collected.first().emoji.id, selectedSound);
+        sounds.set(reaction.emoji.id, selectedSound);
         // remove emoji and soundfile from arrays
         soundFiles.splice(soundFiles.indexOf(selectedSound), 1);
         selectionEmoji.splice(selectionEmoji.indexOf(collected.first().emoji), 1);
@@ -143,9 +142,10 @@ client.on('message', async message => {
                     });
                     // send control panel message and add emoji reactions
                     soundboardControl = await newChannel.send('Test');
-                    message.guild.emojis.cache.each(emoji => {
-                        soundboardControl.react(emoji);
-                    });
+                    for (let key of sounds.keys())
+                    {
+                        soundboardControl.react(key);
+                    }
                 }
                 else
                 {
@@ -240,8 +240,6 @@ client.on('message', async message => {
                 soundFiles = null;
                 selectionEmoji = null;
                 setupMessage = null;
-                console.log(sounds.values());
-                console.log(sounds.keys());
             }
         }
     }
