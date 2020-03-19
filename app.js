@@ -141,7 +141,13 @@ client.on('message', async message => {
                         ]
                     });
                     // send control panel message and add emoji reactions
-                    soundboardControl = await newChannel.send('Test');
+                    let controlMessage = '';
+                    for (let key of sounds.keys())
+                    {
+                        let emoji = message.guild.emojis.resolve(key);
+                        controlMessage = controlMessage + emoji.toString() + ' - ' + sounds.get(key) + '\n';
+                    }
+                    soundboardControl = await newChannel.send(controlMessage);
                     for (let key of sounds.keys())
                     {
                         soundboardControl.react(key);
