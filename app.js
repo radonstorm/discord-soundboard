@@ -22,12 +22,13 @@ var soundFiles = null;
 var selectionEmoji = null;
 
 // map of emoji to sound filenames
-const sounds = new Map();
+var sounds = new Map();
 
 // database connection
 const database = new Sequelize('database', 'user', 'password', {
     host: 'localhost',
     dialect: 'sqlite',
+    logging: false,
     storage: 'botsettings.sqlite'
 });
 // define db model
@@ -36,14 +37,28 @@ const emojiBindings = database.define('emojibindings', {
         type: Sequelize.STRING,
         unique: true
     },
-    soundclip_path: Sequelize.STRING
+    soundclip: Sequelize.STRING,
+    server_id: {
+        type: Sequelize.STRING,
+        references: {
+            model: 'servers',
+            key: 'server_id'
+        }
+    }
+});
+
+const servers = database.define('servers', {
+    server_id: {
+        type: Sequelize.STRING,
+        unique: true
+    }
 });
 
 client.login(config.token);
 
 client.on('ready', () => {
-    console.log('Bot is online');
-    emojiBindings.sync({force: true});
+    emojiBindings.sync();
+    servers.sync();
 });
 
 function destroySoundboard(guild)
@@ -59,7 +74,58 @@ function destroySoundboard(guild)
         category.delete();
     }
     soundboardControl = null;
+    sounds = new Map();
 }
+
+// bot joined a guild, add id to db and prompt setup
+client.on('guildCreate', async guild => {
+    try
+    {
+        const server = await servers.findOne({ where: { server_id: guild.id }});
+        if (!server)
+        {
+            // populate file list
+            soundFiles = fs.readdirSync(AUDIO_DIR);
+            // populate selection emoji list
+            selectionEmoji = Array.from(guild.emojis.cache.values());
+            console.log(guild.roles.highest.name);
+            let channel = await guild.channels.create(SETUP_NAME, {
+                type: 'text',
+                topic: 'Setup channel for Soundboard',
+                permissionOverwrites: [
+                    {
+                        id: guild.roles.highest.id,
+                        allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                    },
+                    {
+                        id: guild.roles.everyone,
+                        deny: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                    },
+                    {
+                        id: guild.me.id,
+                        allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                    }
+                ]
+            });
+            setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
+            channel.send('Use .finish to finish the setup');
+            await servers.create({
+                server_id: guild.id
+            });
+        }
+    }
+    catch (e)
+    {
+        if (e.name === 'SequelizeUniqueConstraintError')
+        {
+            console.log('Server already exists in database');
+        }
+        else
+        {
+            console.log(e);
+        }
+    }
+});
 
 client.on('messageReactionAdd', async (reaction, user) => {
     // only check user reactions on the soundboard control message
@@ -98,12 +164,24 @@ client.on('messageReactionAdd', async (reaction, user) => {
         });
         let selectedSound = soundFiles[selectionEmoji.indexOf(collected.first().emoji)];
         reaction.message.channel.send('Got it, assigning sound ' + selectedSound + ' to the emoji reaction ' + reaction.emoji.toString());
-        // add sound to sound map
-        sounds.set(reaction.emoji.id, selectedSound);
+        // add sound to db
+        try
+        {
+            let binding = emojiBindings.create({
+                emoji_id: reaction.emoji.id,
+                soundclip: selectedSound,
+                server_id: reaction.message.guild.id
+            });
+            console.log('Added ' + binding + ' to db');
+        }
+        catch(e)
+        {
+            console.log(e);
+        }
         // remove emoji and soundfile from arrays
         soundFiles.splice(soundFiles.indexOf(selectedSound), 1);
         selectionEmoji.splice(selectionEmoji.indexOf(collected.first().emoji), 1);
-        setupMessage = await reaction.message.channel.send('React again to setup another sound or type ".finish" to end setup');
+        setupMessage = await reaction.message.channel.send('React again to this message to setup another sound or type ".finish" to end setup');
     }
 });
 
@@ -111,51 +189,75 @@ client.on('message', async message => {
     // messages sent to text channels
     if (message.guild){
         if (message.content === '.join') {
+            // if not currently connected to a voice channel
             if (!currentConnection)
             {
-                // Try to join the sender's voice channel
-                if (message.member.voice.channel) {
-                    let voiceChannel = message.member.voice.channel;
-                    let connection = await voiceChannel.join();
-                    currentConnection = connection;
-                    console.log('Joined #' + connection.channel.name);
-                    
-                    // create soundboard interface
-                    // create category first
-                    let newCategory = await message.guild.channels.create(CATEGORY_NAME, {
-                        type: 'category',
-                        position: voiceChannel.parent.position + 1
+                // if server is recorded in database we're good to go
+                const server = await servers.findOne({ where: { server_id: message.guild.id }});
+                if(server)
+                {
+                    // load from database
+                    const loadedBindings = await emojiBindings.findAll({ 
+                        attributes: ['emoji_id', 'soundclip'],
+                        where: { server_id: message.guild.id }
                     });
-
-                    // create channel
-                    let newChannel = await message.guild.channels.create(CHANNEL_NAME, {
-                        type: 'text',
-                        topic: 'Interface for Soundboard',
-                        parent: newCategory,
-                        // deny people to message soundboard channel
-                        permissionOverwrites: [
-                            {
-                                id: message.guild.roles.everyone,
-                                deny: ['SEND_MESSAGES']
-                            }
-                        ]
-                    });
-                    // send control panel message and add emoji reactions
-                    let controlMessage = '';
-                    for (let key of sounds.keys())
+                    for(let binding of loadedBindings)
                     {
-                        let emoji = message.guild.emojis.resolve(key);
-                        controlMessage = controlMessage + emoji.toString() + ' - ' + sounds.get(key) + '\n';
+                        sounds.set(binding.emoji_id, binding.soundclip);
                     }
-                    soundboardControl = await newChannel.send(controlMessage);
-                    for (let key of sounds.keys())
+
+                    // Try to join the sender's voice channel
+                    if (message.member.voice.channel) {
+                        let voiceChannel = message.member.voice.channel;
+                        let connection = await voiceChannel.join();
+                        currentConnection = connection;
+                        console.log('Joined #' + connection.channel.name);
+                        
+                        // create soundboard interface
+                        // create category first
+                        let newCategory = await message.guild.channels.create(CATEGORY_NAME, {
+                            type: 'category',
+                            position: voiceChannel.parent.position + 1
+                        });
+
+                        // create channel
+                        let newChannel = await message.guild.channels.create(CHANNEL_NAME, {
+                            type: 'text',
+                            topic: 'Interface for Soundboard',
+                            parent: newCategory,
+                            // deny people to message soundboard channel
+                            permissionOverwrites: [
+                                {
+                                    id: message.guild.roles.everyone,
+                                    deny: ['SEND_MESSAGES']
+                                },
+                                {
+                                    id: message.guild.me.id,
+                                    allow: ['SEND_MESSAGES']
+                                }
+                            ]
+                        });
+                        // send control panel message and add emoji reactions
+                        let controlMessage = '';
+                        for (let key of sounds.keys())
+                        {
+                            let emoji = message.guild.emojis.resolve(key);
+                            controlMessage = controlMessage + emoji.toString() + ' - ' + sounds.get(key) + '\n';
+                        }
+                        soundboardControl = await newChannel.send(controlMessage);
+                        for (let key of sounds.keys())
+                        {
+                            soundboardControl.react(key);
+                        }
+                    }
+                    else
                     {
-                        soundboardControl.react(key);
+                        message.reply('You need to be in a voice channel for that to work...');
                     }
                 }
                 else
                 {
-                    message.reply('You need to be in a voice channel for that to work...');
+                    message.reply('I\'m not set up yet!');
                 }
             }
             else
@@ -177,10 +279,6 @@ client.on('message', async message => {
             {
                 message.reply('Not currently in a voice channel');
             }
-        }
-        else if (message.content === '.play' && currentConnection)
-        {
-            currentConnection.play(AUDIO_DIR + 'test.mp3');
         }
         else if (message.content === '.stop' && currentConnection)
         {
@@ -219,17 +317,20 @@ client.on('message', async message => {
                         position: message.position + 1,
                         permissionOverwrites: [
                             {
-                                id: message.author,
+                                id: message.guild.roles.highest.id,
                                 allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
                             },
                             {
                                 id: message.guild.roles.everyone,
                                 deny: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                            },
+                            {
+                                id: message.guild.me.id,
+                                allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
                             }
                         ]
                     });
-                    setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
-                    channel.send('Use .finish to finish the setup');
+                    setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure\nUse .finish to finish the setup');
                 }
                 catch(e)
                 {
