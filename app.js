@@ -300,42 +300,49 @@ client.on('message', async message => {
         // test command for bot setup
         else if (message.content === '.setup')
         {
-            // check if message was sent by server owner
-            if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR))
+            if (!currentConnection)
             {
-                // create setup channel
-                try
+                // check if message was sent by server owner
+                if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR))
                 {
-                    // populate file list
-                    soundFiles = fs.readdirSync(AUDIO_DIR);
-                    // populate selection emoji list
-                    selectionEmoji = Array.from(message.guild.emojis.cache.values());
-                    let channel = await message.guild.channels.create(SETUP_NAME, {
-                        type: 'text',
-                        topic: 'Setup channel for Soundboard',
-                        parent: message.parent,
-                        position: message.position + 1,
-                        permissionOverwrites: [
-                            {
-                                id: message.guild.roles.highest.id,
-                                allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
-                            },
-                            {
-                                id: message.guild.roles.everyone,
-                                deny: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
-                            },
-                            {
-                                id: message.guild.me.id,
-                                allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
-                            }
-                        ]
-                    });
-                    setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure\nUse .finish to finish the setup');
+                    // create setup channel
+                    try
+                    {
+                        // populate file list
+                        soundFiles = fs.readdirSync(AUDIO_DIR);
+                        // populate selection emoji list
+                        selectionEmoji = Array.from(message.guild.emojis.cache.values());
+                        let channel = await message.guild.channels.create(SETUP_NAME, {
+                            type: 'text',
+                            topic: 'Setup channel for Soundboard',
+                            parent: message.parent,
+                            position: message.position + 1,
+                            permissionOverwrites: [
+                                {
+                                    id: message.guild.roles.highest.id,
+                                    allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                                },
+                                {
+                                    id: message.guild.roles.everyone,
+                                    deny: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                                },
+                                {
+                                    id: message.guild.me.id,
+                                    allow: ['SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'VIEW_CHANNEL']
+                                }
+                            ]
+                        });
+                        setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure\nUse .finish to finish the setup');
+                    }
+                    catch(e)
+                    {
+                        console.log(e);
+                    }
                 }
-                catch(e)
-                {
-                    console.log(e);
-                }
+            }
+            else
+            {
+                message.reply('I can\'t be set up if I\'m in a voice channel');
             }
         }
         else if (message.content === '.finish')
