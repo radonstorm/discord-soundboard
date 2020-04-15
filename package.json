@@ -4,7 +4,8 @@
   "description": "A soundboard for discord voice channels",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node ."
   },
   "author": "Jack Lardner",
   "license": "GPL-3.0",

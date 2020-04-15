@@ -147,16 +147,21 @@ client.on('messageReactionAdd', async (reaction, user) => {
         reaction.message.channel.send('You reacted with ' + reaction.emoji.toString());
         // do something to have the user select soundclip
         // send message of audio files
-        let message = '', ii = 0;
-        soundFiles.forEach(file => {
-            message = message + selectionEmoji[ii].toString() + ' - ' + file + '\n';
-            ii++;
-        });
+        let message = '';
+        let limit = soundFiles.length;
+        if (limit > selectionEmoji.length)
+        {
+            limit = selectionEmoji.length;
+        }
+        for (let ii = 0; ii < limit; ii++)
+        {
+            message = message + selectionEmoji[ii].toString() + ' - ' + soundFiles[ii] + '\n';
+        }
         message = message + 'Which sound file should be played?';
         let selectionMessage = await reaction.message.channel.send(message);
-        selectionEmoji.forEach(async (emoji) => {
-            await selectionMessage.react(emoji);
-        });
+        // selectionEmoji.forEach(async (emoji) => {
+        //     await selectionMessage.react(emoji);
+        // });
         let collected = await selectionMessage.awaitReactions((reaction, user) => user.id != config.user_id, {
             max: 1,
             maxEmojis: 1,
@@ -219,7 +224,7 @@ client.on('message', async message => {
                             type: 'category',
                             position: voiceChannel.parent.position + 1
                         });
-
+                        
                         // create channel
                         let newChannel = await message.guild.channels.create(CHANNEL_NAME, {
                             type: 'text',
@@ -286,16 +291,19 @@ client.on('message', async message => {
         }
         else if (message.content === '.die')
         {
-            if(currentConnection)
+            if (message.member.id === config.owner_id)
             {
-                currentConnection.disconnect();
-                currentConnection = null;
+                if (currentConnection)
+                {
+                    currentConnection.disconnect();
+                    currentConnection = null;
+                }
+                client.guilds.cache.each(guild =>
+                {
+                    destroySoundboard(guild);
+                });
+                client.destroy();
             }
-            client.guilds.cache.each(guild =>
-            {
-                destroySoundboard(guild);
-            });
-            client.destroy();
         }
         // test command for bot setup
         else if (message.content === '.setup')
