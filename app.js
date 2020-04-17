@@ -57,6 +57,7 @@ const servers = database.define('servers', {
 client.login(config.token);
 
 client.on('ready', () => {
+    console.log('Soundboard online');
     emojiBindings.sync();
     servers.sync();
 });
@@ -107,8 +108,7 @@ client.on('guildCreate', async guild => {
                     }
                 ]
             });
-            setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure');
-            channel.send('Use .finish to finish the setup');
+            setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure\nUse .finish to finish the setup');
             await servers.create({
                 server_id: guild.id
             });
@@ -172,12 +172,21 @@ client.on('messageReactionAdd', async (reaction, user) => {
         // add sound to db
         try
         {
-            let binding = emojiBindings.create({
-                emoji_id: reaction.emoji.id,
-                soundclip: selectedSound,
-                server_id: reaction.message.guild.id
-            });
-            console.log('Added ' + binding + ' to db');
+            let binding = await emojiBindings.findOne({ where: { emoji_id: reaction.emoji.id }});
+            if (binding)
+            {
+                emojiBindings.update({ soundclip: selectedSound }, { where: { emoji_id: reaction.emoji.id }});
+                console.log('Updated binding for ' + reaction.emoji.toString());
+            }
+            else
+            {
+                binding = emojiBindings.create({
+                    emoji_id: reaction.emoji.id,
+                    soundclip: selectedSound,
+                    server_id: reaction.message.guild.id
+                });
+                console.log('Added ' + binding + ' to db');
+            }
         }
         catch(e)
         {
@@ -363,6 +372,10 @@ client.on('message', async message => {
                 selectionEmoji = null;
                 setupMessage = null;
             }
+        }
+        else if (message.content === '.source')
+        {
+            message.reply('https://github.com/radonstorm/discord-soundboard');
         }
     }
 });
