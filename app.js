@@ -13,6 +13,8 @@ const AUDIO_DIR = __dirname + '/audio/';
 var currentConnection = null;
 // reference to all soundboard controls messages
 var soundboardControls = new Set();
+// reference to all soundboard-control channels
+var soundboardControlChannels = new Set();
 // reference to currently active setup message
 var setupMessage = null;
 
@@ -70,6 +72,7 @@ client.on('ready', async () => {
     {
         // add message id to set
         soundboardControls.add(server.control_message_id);
+        soundboardControlChannels.add(server.control_channel_id);
         // add control message to cache so we can catch messageReactionAdd events
         let guild = client.guilds.resolve(server.server_id);
         guild.channels.resolve(server.control_channel_id).messages.fetch(server.control_message_id);
@@ -393,6 +396,10 @@ client.on('message', async message => {
         else if (message.content === '.source')
         {
             message.reply('https://github.com/radonstorm/discord-soundboard');
+        }
+        else if (soundboardControlChannels.has(message.channel.id))
+        {
+            message.delete();
         }
     }
 });
