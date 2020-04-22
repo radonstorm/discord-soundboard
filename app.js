@@ -413,17 +413,44 @@ client.on('message', async message => {
                 selectionEmoji = null;
                 setupMessage = null;
 
-                // create control channels, update db with channel ids
-                let createdChannels = await createControlChannel(message.guild);                
-                await servers.update({
-                    control_channel_id: createdChannels.channel.id,
-                    control_message_id: createdChannels.message.id
-                }, {
-                    where: {
-                        server_id: message.guild.id
+                // check if there is already a control channel and message
+                let server = await servers.findOne({ where: { server_id: message.guild.id }});
+                if (server.control_channel_id)
+                {
+                    console.log('Updating control message');
+                    // edit current control message
+                    let controlChannel = message.guild.channels.cache.get(server.control_channel_id);
+                    let controlMessage = controlChannel.messages.cache.get(server.control_message_id);
+                    let bindings = await loadBindings(message.guild.id);
+                    let text = '';
+                    for (let binding of bindings)
+                    {
+                        let emoji = message.guild.emojis.resolve(binding.emoji_id);
+                        text = text + emoji.toString() + ' - ' + binding.soundclip + '\n';
                     }
-                });
-                soundboardControls.add(createdChannels.message.id);
+                    controlMessage.edit(text);
+                    // re send reactions to reflect changes
+                    controlMessage.reactions.removeAll();
+                    for (let binding of bindings)
+                    {
+                        controlMessage.react(binding.emoji_id);
+                    }
+                }
+                else
+                {
+                    // create control channels, update db with channel ids
+                    console.log('Creating controls');
+                    let createdChannels = await createControlChannel(message.guild);                
+                    await servers.update({
+                        control_channel_id: createdChannels.channel.id,
+                        control_message_id: createdChannels.message.id
+                    }, {
+                        where: {
+                            server_id: message.guild.id
+                        }
+                    });
+                    soundboardControls.add(createdChannels.message.id);
+                }
             }
         }
         else if (message.content === '.source')
