@@ -289,7 +289,19 @@ client.on('message', async message => {
                     // check if the channel exists, if not recreate
                     if (!message.guild.channels.cache.get(server.control_channel_id))
                     {
-                        createControlChannel(message.guild);
+                        soundboardControls.delete(server.control_message_id);
+                        soundboardControlChannels.delete(server.control_channel_id);
+                        let createdChannels = await createControlChannel(message.guild);
+                        await servers.update({
+                            control_channel_id: createdChannels.channel.id,
+                            control_message_id: createdChannels.message.id
+                        }, {
+                            where: {
+                                server_id: message.guild.id
+                            }
+                        });
+                        soundboardControls.add(createdChannels.message.id);
+                        soundboardControlChannels.add(createdChannels.channel.id);
                     }
                     let bindings = await loadBindings(message.guild.id);
                     for(let binding of bindings)
@@ -455,6 +467,7 @@ client.on('message', async message => {
                         }
                     });
                     soundboardControls.add(createdChannels.message.id);
+                    soundboardControlChannels.add(createdChannels.channel.id);
                 }
             }
         }
