@@ -286,6 +286,11 @@ client.on('message', async message => {
                 const server = await servers.findOne({ where: { server_id: message.guild.id }});
                 if(server)
                 {
+                    // check if the channel exists, if not recreate
+                    if (!message.guild.channels.cache.get(server.control_channel_id))
+                    {
+                        createControlChannel(message.guild);
+                    }
                     let bindings = await loadBindings(message.guild.id);
                     for(let binding of bindings)
                     {
