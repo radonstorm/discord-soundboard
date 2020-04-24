@@ -415,7 +415,7 @@ client.on('message', async message => {
 
                 // check if there is already a control channel and message
                 let server = await servers.findOne({ where: { server_id: message.guild.id }});
-                if (server.control_channel_id)
+                if (server.control_channel_id && message.guild.channels.cache.get(server.control_channel_id))
                 {
                     console.log('Updating control message');
                     // edit current control message
