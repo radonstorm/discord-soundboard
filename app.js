@@ -11,8 +11,10 @@ const AUDIO_DIR = __dirname + '/audio/';
 
 // reference to current voice connection, only connected to one vc at a time
 var currentConnection = null;
-// reference to soundboard-controls channel
-var soundboardControl = null;
+// reference to all soundboard controls messages
+var soundboardControls = new Set();
+// reference to all soundboard-control channels
+var soundboardControlChannels = new Set();
 // reference to currently active setup message
 var setupMessage = null;
 
@@ -51,33 +53,101 @@ const servers = database.define('servers', {
     server_id: {
         type: Sequelize.STRING,
         unique: true
-    }
+    },
+    control_message_id: Sequelize.STRING,
+    control_channel_id: Sequelize.STRING
 });
 
 client.login(config.token);
 
-client.on('ready', () => {
+client.on('ready', async () => {
     console.log('Soundboard online');
     emojiBindings.sync();
     servers.sync();
+    // load control message ids
+    let servers_db = await servers.findAll({
+        attributes: ['server_id', 'control_message_id', 'control_channel_id']
+    });
+    for(let server of servers_db)
+    {
+        // guild object representing current server
+        let guild = client.guilds.resolve(server.server_id);
+        let controlMessageID = server.control_message_id;
+        let controlChannelID = server.control_channel_id;
+        // if control channel is not recorded in db, (using old version)
+        // OR if the channel doesnt exist (deleted between outages)
+        // create channels and send message
+        if (!controlChannelID ||!guild.channels.resolve(controlChannelID))
+        {
+            let createdChannels = await createControlChannel(guild);
+            await servers.update({
+                control_channel_id: createdChannels.channel.id,
+                control_message_id: createdChannels.message.id
+            }, {
+                where: {
+                    server_id: server.server_id
+                }
+            });
+            controlMessageID = createdChannels.message.id;
+            controlChannelID = createdChannels.channel.id;
+        }
+        // add message id to set
+        soundboardControls.add(controlMessageID);
+        soundboardControlChannels.add(controlChannelID);
+        // add control message to cache so we can catch messageReactionAdd events
+        guild.channels.resolve(controlChannelID).messages.fetch(controlMessageID);
+    }
 });
 
-function destroySoundboard(guild)
+// given a server id load appropriate bindings from the db
+async function loadBindings(serverId)
 {
-    let channel = guild.channels.cache.find(channel => channel.name === CHANNEL_NAME);
-    if (channel)
-    {
-        channel.delete();
-    }
-    let category = guild.channels.cache.find(category => category.name === CATEGORY_NAME);
-    if (category)
-    {
-        category.delete();
-    }
-    soundboardControl = null;
-    sounds = new Map();
+    return emojiBindings.findAll({
+        attributes: ['emoji_id', 'soundclip'],
+        where: { server_id: serverId }
+    });
 }
 
+// create control channel and send message
+async function createControlChannel(guild)
+{
+    let category = await guild.channels.create(CATEGORY_NAME,{
+        type: 'category'
+    });
+    let channel = await guild.channels.create(CHANNEL_NAME, {
+        type: 'text',
+        topic: 'Interface for Soundboard',
+        parent: category,
+        // deny messages
+        permissionOverwrites: [
+            {
+                id: guild.roles.everyone,
+                deny: ['SEND_MESSAGES']
+            },
+            {
+                id: guild.me.id,
+                allow: ['SEND_MESSAGES']
+            }
+        ]
+    });
+    let bindings = await loadBindings(guild.id);
+    let message = '';
+    for (let binding of bindings)
+    {
+        let emoji = guild.emojis.resolve(binding.emoji_id);
+        message = message + emoji.toString() + ' - ' + binding.soundclip + '\n';
+    }
+    let soundboardControlMessage = await channel.send(message);
+    for (let binding of bindings)
+    {
+        soundboardControlMessage.react(binding.emoji_id);
+    }
+    return {
+        channel: channel,
+        category: category,
+        message: soundboardControlMessage
+    };
+}
 // bot joined a guild, add id to db and prompt setup
 client.on('guildCreate', async guild => {
     try
@@ -110,7 +180,9 @@ client.on('guildCreate', async guild => {
             });
             setupMessage = await channel.send('Hi there, welcome to the setup for Discord Soundboard\nReact to this message to start the setup procedure\nUse .finish to finish the setup');
             await servers.create({
-                server_id: guild.id
+                server_id: guild.id,
+                control_message_id: null,
+                control_channel_id: null
             });
         }
     }
@@ -129,12 +201,12 @@ client.on('guildCreate', async guild => {
 
 client.on('messageReactionAdd', async (reaction, user) => {
     // only check user reactions on the soundboard control message
-    if(user.id != config.user_id && soundboardControl && reaction.message.id === soundboardControl.id)
+    if(user.id != config.user_id && soundboardControls.has(reaction.message.id))
     {
+        // remove user's reactions
+        reaction.users.remove(user);
         if(currentConnection)
         {
-            // remove user's reactions
-            reaction.users.remove(user);
             // play sound
             console.log('Playing ' + sounds.get(reaction.emoji.id));
             currentConnection.play(AUDIO_DIR + sounds.get(reaction.emoji.id));
@@ -175,12 +247,12 @@ client.on('messageReactionAdd', async (reaction, user) => {
             let binding = await emojiBindings.findOne({ where: { emoji_id: reaction.emoji.id }});
             if (binding)
             {
-                emojiBindings.update({ soundclip: selectedSound }, { where: { emoji_id: reaction.emoji.id }});
+                await emojiBindings.update({ soundclip: selectedSound }, { where: { emoji_id: reaction.emoji.id }});
                 console.log('Updated binding for ' + reaction.emoji.toString());
             }
             else
             {
-                binding = emojiBindings.create({
+                binding = await emojiBindings.create({
                     emoji_id: reaction.emoji.id,
                     soundclip: selectedSound,
                     server_id: reaction.message.guild.id
@@ -202,7 +274,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
 client.on('message', async message => {
     // messages sent to text channels
     if (message.guild){
-        if (message.content === '.join') {
+        if (soundboardControlChannels.has(message.channel.id))
+        {
+            message.delete();
+        }
+        else if (message.content === '.join') {
             // if not currently connected to a voice channel
             if (!currentConnection)
             {
@@ -210,59 +286,34 @@ client.on('message', async message => {
                 const server = await servers.findOne({ where: { server_id: message.guild.id }});
                 if(server)
                 {
-                    // load from database
-                    const loadedBindings = await emojiBindings.findAll({ 
-                        attributes: ['emoji_id', 'soundclip'],
-                        where: { server_id: message.guild.id }
-                    });
-                    for(let binding of loadedBindings)
+                    // check if the channel exists, if not recreate
+                    if (!message.guild.channels.cache.get(server.control_channel_id))
+                    {
+                        soundboardControls.delete(server.control_message_id);
+                        soundboardControlChannels.delete(server.control_channel_id);
+                        let createdChannels = await createControlChannel(message.guild);
+                        await servers.update({
+                            control_channel_id: createdChannels.channel.id,
+                            control_message_id: createdChannels.message.id
+                        }, {
+                            where: {
+                                server_id: message.guild.id
+                            }
+                        });
+                        soundboardControls.add(createdChannels.message.id);
+                        soundboardControlChannels.add(createdChannels.channel.id);
+                    }
+                    let bindings = await loadBindings(message.guild.id);
+                    for(let binding of bindings)
                     {
                         sounds.set(binding.emoji_id, binding.soundclip);
                     }
-
                     // Try to join the sender's voice channel
                     if (message.member.voice.channel) {
                         let voiceChannel = message.member.voice.channel;
                         let connection = await voiceChannel.join();
                         currentConnection = connection;
                         console.log('Joined #' + connection.channel.name);
-                        
-                        // create soundboard interface
-                        // create category first
-                        let newCategory = await message.guild.channels.create(CATEGORY_NAME, {
-                            type: 'category',
-                            position: voiceChannel.parent.position + 1
-                        });
-                        
-                        // create channel
-                        let newChannel = await message.guild.channels.create(CHANNEL_NAME, {
-                            type: 'text',
-                            topic: 'Interface for Soundboard',
-                            parent: newCategory,
-                            // deny people to message soundboard channel
-                            permissionOverwrites: [
-                                {
-                                    id: message.guild.roles.everyone,
-                                    deny: ['SEND_MESSAGES']
-                                },
-                                {
-                                    id: message.guild.me.id,
-                                    allow: ['SEND_MESSAGES']
-                                }
-                            ]
-                        });
-                        // send control panel message and add emoji reactions
-                        let controlMessage = '';
-                        for (let key of sounds.keys())
-                        {
-                            let emoji = message.guild.emojis.resolve(key);
-                            controlMessage = controlMessage + emoji.toString() + ' - ' + sounds.get(key) + '\n';
-                        }
-                        soundboardControl = await newChannel.send(controlMessage);
-                        for (let key of sounds.keys())
-                        {
-                            soundboardControl.react(key);
-                        }
                     }
                     else
                     {
@@ -287,7 +338,7 @@ client.on('message', async message => {
                 currentConnection.disconnect();
                 currentConnection = null;
                 console.log('Disconnected from #' + name);
-                destroySoundboard(message.guild);
+                sounds = new Map();
             }
             else
             {
@@ -307,10 +358,6 @@ client.on('message', async message => {
                     currentConnection.disconnect();
                     currentConnection = null;
                 }
-                client.guilds.cache.each(guild =>
-                {
-                    destroySoundboard(guild);
-                });
                 client.destroy();
             }
         }
@@ -325,6 +372,16 @@ client.on('message', async message => {
                     // create setup channel
                     try
                     {
+                        // check if server is recorded in db, if not then add it
+                        //only really used for dev
+                        if (!await servers.findOne({ where: { server_id: message.guild.id }}))
+                        {
+                            await servers.create({
+                                server_id: message.guild.id,
+                                control_message_id: null,
+                                control_channel_id: null
+                            });
+                        }
                         // populate file list
                         soundFiles = fs.readdirSync(AUDIO_DIR);
                         // populate selection emoji list
@@ -362,6 +419,7 @@ client.on('message', async message => {
                 message.reply('I can\'t be set up if I\'m in a voice channel');
             }
         }
+        // finish setup, create control channel & message
         else if (message.content === '.finish')
         {
             if (message.member.hasPermission(Discord.Permissions.FLAGS.ADMINISTRATOR))
@@ -371,6 +429,46 @@ client.on('message', async message => {
                 soundFiles = null;
                 selectionEmoji = null;
                 setupMessage = null;
+
+                // check if there is already a control channel and message
+                let server = await servers.findOne({ where: { server_id: message.guild.id }});
+                if (server.control_channel_id && message.guild.channels.cache.get(server.control_channel_id))
+                {
+                    console.log('Updating control message');
+                    // edit current control message
+                    let controlChannel = message.guild.channels.cache.get(server.control_channel_id);
+                    let controlMessage = controlChannel.messages.cache.get(server.control_message_id);
+                    let bindings = await loadBindings(message.guild.id);
+                    let text = '';
+                    for (let binding of bindings)
+                    {
+                        let emoji = message.guild.emojis.resolve(binding.emoji_id);
+                        text = text + emoji.toString() + ' - ' + binding.soundclip + '\n';
+                    }
+                    controlMessage.edit(text);
+                    // re send reactions to reflect changes
+                    controlMessage.reactions.removeAll();
+                    for (let binding of bindings)
+                    {
+                        controlMessage.react(binding.emoji_id);
+                    }
+                }
+                else
+                {
+                    // create control channels, update db with channel ids
+                    console.log('Creating controls');
+                    let createdChannels = await createControlChannel(message.guild);                
+                    await servers.update({
+                        control_channel_id: createdChannels.channel.id,
+                        control_message_id: createdChannels.message.id
+                    }, {
+                        where: {
+                            server_id: message.guild.id
+                        }
+                    });
+                    soundboardControls.add(createdChannels.message.id);
+                    soundboardControlChannels.add(createdChannels.channel.id);
+                }
             }
         }
         else if (message.content === '.source')
