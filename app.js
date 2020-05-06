@@ -483,8 +483,9 @@ client.on('message', async message => {
                 // only download videos 30 seconds or under
                 if (Number(info.length_seconds) <= 30)
                 {
-                    message.channel.send('Downloading ' + info.title);
+                    console.log('Downloading YouTube video ' + info.title + ': ' + info.video_id);
                     ytdl(url, {quality: 'highestaudio', filter: 'audioonly'}).pipe(fs.createWriteStream(AUDIO_DIR + info.title + '.' + info.formats[0].container));
+                    message.channel.send('Downloaded ' + info.title);
                 }
                 else
                 {
@@ -498,7 +499,7 @@ client.on('message', async message => {
         }
         else if (message.content === '.source')
         {
-            message.reply('https://github.com/radonstorm/discord-soundboard');
+            message.channel.send('https://github.com/radonstorm/discord-soundboard');
         }
     }
 });
