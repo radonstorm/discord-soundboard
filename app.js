@@ -3,6 +3,7 @@ const client = new Discord.Client();
 const config = require('./config.json');
 const Sequelize = require('sequelize');
 const fs = require('fs');
+const ytdl = require('ytdl-core');
 
 const CATEGORY_NAME = 'soundboard';
 const CHANNEL_NAME = 'soundboard-controls';
@@ -135,7 +136,7 @@ async function createControlChannel(guild)
     for (let binding of bindings)
     {
         let emoji = guild.emojis.resolve(binding.emoji_id);
-        message = message + emoji.toString() + ' - ' + binding.soundclip + '\n';
+        message = message + emoji.toString() + ' - ' + binding.soundclip.split('.')[0] + '\n';
     }
     let soundboardControlMessage = await channel.send(message);
     for (let binding of bindings)
@@ -443,7 +444,7 @@ client.on('message', async message => {
                     for (let binding of bindings)
                     {
                         let emoji = message.guild.emojis.resolve(binding.emoji_id);
-                        text = text + emoji.toString() + ' - ' + binding.soundclip + '\n';
+                        text = text + emoji.toString() + ' - ' + binding.soundclip.split('.')[0] + '\n';
                     }
                     controlMessage.edit(text);
                     // re send reactions to reflect changes
@@ -469,6 +470,30 @@ client.on('message', async message => {
                     soundboardControls.add(createdChannels.message.id);
                     soundboardControlChannels.add(createdChannels.channel.id);
                 }
+            }
+        }
+        else if (message.content.includes('.dl'))
+        {
+            // only parse valid youtube and shortened youtu.be links
+            if (message.content.includes('youtube.com') || message.content.includes('youtu.be'))
+            {
+                // split url from user given command
+                const url = message.content.split(' ')[1];
+                let info = await ytdl.getInfo(url, {quality: 'highestaudio', filter: 'audio'});
+                // only download videos 30 seconds or under
+                if (Number(info.length_seconds) <= 30)
+                {
+                    message.channel.send('Downloading ' + info.title);
+                    ytdl(url, {quality: 'highestaudio', filter: 'audioonly'}).pipe(fs.createWriteStream(AUDIO_DIR + info.title + '.' + info.formats[0].container));
+                }
+                else
+                {
+                    message.channel.send('That YouTube clip is too long for a soundclip');
+                }
+            }
+            else
+            {
+                message.channel.send('Not a valid YouTube video!');
             }
         }
         else if (message.content === '.source')
