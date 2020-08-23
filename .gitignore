@@ -117,3 +117,6 @@ config.json
 
 # sqlite dbs
 *.sqlite
+
+# vscode files
+.vscode
