@@ -3,7 +3,6 @@ const client = new Discord.Client();
 const config = require('./config.json');
 const Sequelize = require('sequelize');
 const fs = require('fs');
-const ytdl = require('ytdl-core');
 
 const CATEGORY_NAME = 'soundboard';
 const CHANNEL_NAME = 'soundboard-controls';
@@ -26,6 +25,14 @@ var selectionEmoji = null;
 
 // map of emoji to sound filenames
 var sounds = new Map();
+
+// collection of event handlers
+client.events = new Discord.Collection();
+const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
+for (const file of eventFiles) {
+    const command = require(`./events/${file}`);
+    client.events.set(command.name, command)
+}
 
 // database connection
 const database = new Sequelize('database', 'user', 'password', {
@@ -472,30 +479,9 @@ client.on('message', async message => {
                 }
             }
         }
-        else if (message.content.includes('.dl'))
+        else if (message.content.startsWith('.dl'))
         {
-            // only parse valid youtube and shortened youtu.be links
-            if (message.content.includes('youtube.com') || message.content.includes('youtu.be'))
-            {
-                // split url from user given command
-                const url = message.content.split(' ')[1];
-                let info = await ytdl.getInfo(url, {quality: 'highestaudio', filter: 'audio'});
-                // only download videos 30 seconds or under
-                if (Number(info.length_seconds) <= 30)
-                {
-                    console.log('Downloading YouTube video ' + info.title + ': ' + info.video_id);
-                    ytdl(url, {quality: 'highestaudio', filter: 'audioonly'}).pipe(fs.createWriteStream(AUDIO_DIR + info.title + '.' + info.formats[0].container));
-                    message.channel.send('Downloaded ' + info.title);
-                }
-                else
-                {
-                    message.channel.send('That YouTube clip is too long for a soundclip');
-                }
-            }
-            else
-            {
-                message.channel.send('Not a valid YouTube video!');
-            }
+            client.events.get('youtube-dl').execute(message, {AUDIO_DIR: AUDIO_DIR});
         }
         else if (message.content === '.source')
         {
